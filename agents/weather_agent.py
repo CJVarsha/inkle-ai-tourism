@@ -2,49 +2,56 @@ import requests
 
 def get_coordinates(city_name: str) -> tuple:
     """
-    Use OpenStreetMap Nominatim to get latitude and longitude for a city.
-    Returns a tuple (lat, lon) or (None, None) on failure.
+    Get latitude and longitude for a city using OpenStreetMap Nominatim API.
+    Returns (lat, lon) tuple or (None, None) if not found.
     """
     GEOCODER_URL = "https://nominatim.openstreetmap.org/search"
+    headers = {
+        "User-Agent": "inkle-ai-tourism-app (cjvarsha9204@gmail.com)"
+    }
+    params = {
+        "q": city_name,
+        "format": "json",
+        "limit": 1,
+        "addressdetails": 1
+    }
+
     try:
-        params = {
-            'q': city_name,
-            'format': 'json',
-            'limit': 1,
-            'addressdetails': 1
-        }
-        headers = {
-            'User-Agent': 'InkleAI-Tourism-Agent/1.0 (contact: your-email@example.com)'
-        }
         resp = requests.get(GEOCODER_URL, params=params, headers=headers, timeout=10)
+        print(f"[DEBUG] Geocoder response status: {resp.status_code}, body snippet: {resp.text[:200]}")
         resp.raise_for_status()
         data = resp.json()
-        if data and 'lat' in data[0] and 'lon' in data[0]:
-            lat = float(data[0]['lat'])
-            lon = float(data[0]['lon'])
-            print(f"[DEBUG] Geocoded city '{city_name}' to lat={lat}, lon={lon}")
-            return lat, lon
-        else:
-            print(f"[WARN] No geocode result for '{city_name}'")
+
+        if not data:
+            print(f"[ERROR] No geocode data returned for city: {city_name}")
             return None, None
-    except Exception as e:
-        print(f"[ERROR] Geocoding failed for '{city_name}': {e}")
+
+        lat = float(data[0]['lat'])
+        lon = float(data[0]['lon'])
+        print(f"[DEBUG] Geocoded city '{city_name}' to lat={lat}, lon={lon}")
+        return lat, lon
+
+    except requests.RequestException as e:
+        print(f"[ERROR] Geocoding API request failed for city '{city_name}': {e}")
+        return None, None
+    except (ValueError, KeyError) as e:
+        print(f"[ERROR] Parsing geocoding response failed for city '{city_name}': {e}")
         return None, None
 
 def weather_query(city_name: str) -> dict:
     """
-    Query Open-Meteo API for current weather and daily forecasts for a city.
-    Returns a dict with weather data or an error message.
+    Query Open-Meteo API for current weather and daily forecast.
+    Returns a dict with weather data or error reason.
     """
     lat, lon = get_coordinates(city_name)
     if lat is None or lon is None:
         return {
             "success": False,
             "location": city_name,
-            "reason": f"Could not resolve location '{city_name}'. Try a major city like 'Paris, France'."
+            "reason": f"Could not determine location coordinates for '{city_name}'. Try specifying a more precise city name."
         }
 
-    BASE_URL = "https://api.open-meteo.com/v1/forecast"
+    WEATHER_URL = "https://api.open-meteo.com/v1/forecast"
     params = {
         "latitude": lat,
         "longitude": lon,
@@ -52,16 +59,18 @@ def weather_query(city_name: str) -> dict:
         "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum",
         "timezone": "auto"
     }
+
     try:
-        print(f"[DEBUG] Querying Open-Meteo for '{city_name}' at lat={lat}, lon={lon}")
-        resp = requests.get(BASE_URL, params=params, timeout=10)
+        resp = requests.get(WEATHER_URL, params=params, timeout=10)
+        print(f"[DEBUG] Weather API response status: {resp.status_code}, body snippet: {resp.text[:200]}")
         resp.raise_for_status()
         data = resp.json()
 
         current = data.get("current_weather", {})
         daily = data.get("daily", {})
 
-        weather_info = {
+        result = {
+            "success": True,
             "location": city_name,
             "coordinates": (lat, lon),
             "weather": {
@@ -73,23 +82,30 @@ def weather_query(city_name: str) -> dict:
                 "today": {
                     "high_temp": daily.get("temperature_2m_max", [None])[0],
                     "low_temp": daily.get("temperature_2m_min", [None])[0],
-                    "precipitation": daily.get("precipitation_sum", [None])[0]
-                }
+                    "precipitation": daily.get("precipitation_sum", [None])[0],
+                },
             },
-            "success": True
         }
-        print(f"[DEBUG] Received weather data for '{city_name}': {weather_info}")
-        return weather_info
-    except Exception as e:
-        print(f"[ERROR] Open-Meteo API call failed for '{city_name}': {e}")
+        print(f"[DEBUG] Weather data fetched for '{city_name}': {result}")
+        return result
+
+    except requests.RequestException as e:
+        print(f"[ERROR] Weather API request failed for '{city_name}': {e}")
         return {
             "success": False,
             "location": city_name,
             "reason": "Failed to fetch weather data due to API error."
         }
+    except (ValueError, KeyError) as e:
+        print(f"[ERROR] Parsing weather API response failed for '{city_name}': {e}")
+        return {
+            "success": False,
+            "location": city_name,
+            "reason": "Unexpected data format from weather API."
+        }
 
-# Optional quick test code if running script directly
+# For quick local testing
 if __name__ == "__main__":
-    city = input("Enter city to get weather for: ")
+    city = input("Enter a city name to get weather: ")
     result = weather_query(city)
     print(result)
